@@ -13,3 +13,4 @@ crate-type = ["cdylib"]
 flate2_rs = { package = "flate2", version = "1.0.28" }
 magnus = { version = "0.6.2", features = ["rb-sys"] }
 rb-sys = { version = "*", features = ["stable-api-compiled-fallback"] }
+thiserror = "1.0.56"
