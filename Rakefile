@@ -13,7 +13,9 @@ require "rb_sys/extensiontask"
 
 GEMSPEC = Gem::Specification.load("flate2.gemspec")
 
-RbSys::ExtensionTask.new("flate2", GEMSPEC)
+RbSys::ExtensionTask.new("flate2", GEMSPEC) do |ext|
+  ext.lib_dir = "lib/flate2"
+end
 
 task build: :compile
 task default: %i[compile test rubocop]
