@@ -19,3 +19,20 @@ end
 
 task build: :compile
 task default: %i[compile test rubocop]
+
+Dir["bench/*.rb"].each do |bench|
+  desc "Run the #{bench} benchmark"
+  task "bench:#{bench}" => "compile:release" do
+    ruby "-Ilib", bench
+  end
+
+  desc "Profile the #{bench} benchmark"
+  task "profile:#{bench}" => "compile:release" do
+    ENV["PROFILE_MODE"] = "1"
+    sh "samply", "record", RbConfig.ruby, "-Ilib", bench
+    ENV["PROFILE_MODE"] = nil
+  end
+
+  task bench: "bench:#{bench}"
+  task profile: "profile:#{bench}"
+end
