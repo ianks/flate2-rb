@@ -1,4 +1,5 @@
 mod nogvl;
+mod rstring_writer;
 mod tmplock;
 
 use std::{
@@ -14,9 +15,11 @@ use magnus::{
     Error, ExceptionClass, RModule, RString, Ruby,
 };
 use nogvl::InterruptableError;
+use rstring_writer::RStringWriter;
 use tmplock::Tmplock;
 
-const CHUNK_SIZE: usize = 1024;
+const CHUNK_SIZE: usize = 4096;
+const MAX_EMBED_LEN: usize = 640;
 
 static ROOT_MODULE: Lazy<RModule> = Lazy::new(|ruby| ruby.define_module("Flate2").unwrap());
 
@@ -43,28 +46,27 @@ static DECODE_ERROR: Lazy<ExceptionClass> = Lazy::new(|ruby| {
 
 fn gunzip(ruby: &Ruby, data: RString) -> Result<RString, Error> {
     let (buf, _guard) = unsafe { data.as_locked_slice()? };
-    let mut out = ruby.str_buf_new(0);
+    let estimated_size = buf.len() * 2;
+    let out = ruby.str_buf_new(estimated_size);
+    let mut outbuf = RStringWriter::new(out);
 
-    let mut decoder = flate2_rs::read::GzDecoder::new(buf);
+    let mut decoder = flate2_rs::bufread::GzDecoder::new(buf);
     let interrupt_flag = Cell::new(false);
     let interrupt_callback = || interrupt_flag.set(true);
-    let mut total = 0;
 
     let mut func = || loop {
-        if interrupt_flag.get() {
-            return Err(InterruptableError::Interrupt);
-        }
-
-        let mut buf = [0; CHUNK_SIZE];
-        let read = decoder.read(&mut buf)?;
+        let nextbuf = outbuf.next_buffer().map_err(InterruptableError::Internal)?;
+        let read = decoder.read(nextbuf)?;
 
         if read == 0 {
             return Ok(());
         }
 
-        total += read;
+        outbuf.consume(read).map_err(InterruptableError::Internal)?;
 
-        out.write_all(&buf[..read])?
+        if interrupt_flag.get() {
+            return Err(InterruptableError::Interrupt);
+        }
     };
 
     loop {
@@ -77,34 +79,28 @@ fn gunzip(ruby: &Ruby, data: RString) -> Result<RString, Error> {
         };
     }
 
-    Ok(out)
+    outbuf.finish()
 }
 
 fn gzip(ruby: &Ruby, data: RString) -> Result<RString, Error> {
     let (buf, _guard) = unsafe { data.as_locked_slice()? };
-    let out = ruby.str_buf_new(0);
-    let mut cursored_input = std::io::Cursor::new(buf);
+    let out = ruby.str_buf_new(MAX_EMBED_LEN);
     let interrupt_flag = Cell::new(false);
     let mut encoder = flate2_rs::write::GzEncoder::new(out, flate2_rs::Compression::best());
     let mut interrupt_callback = || interrupt_flag.set(true);
-    let mut total = 0;
+    let mut chunks = buf.chunks(CHUNK_SIZE);
 
-    let mut func = || loop {
-        if interrupt_flag.get() {
-            interrupt_flag.set(false);
-            return Err(InterruptableError::Interrupt);
+    let mut func = || {
+        for nextbuf in chunks.by_ref() {
+            encoder.write_all(nextbuf)?;
+
+            if interrupt_flag.get() {
+                interrupt_flag.set(false);
+                return Err(InterruptableError::Interrupt);
+            }
         }
 
-        let mut buf = [0; CHUNK_SIZE];
-        let read = cursored_input.read(&mut buf)?;
-
-        if read == 0 {
-            return Ok(());
-        }
-
-        total += read;
-
-        encoder.write_all(&buf[..read])?
+        Ok(())
     };
 
     loop {
@@ -125,5 +121,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("Flate2")?;
     module.define_singleton_method("gzip", function!(gzip, 1))?;
     module.define_singleton_method("gunzip", function!(gunzip, 1))?;
+
     Ok(())
 }

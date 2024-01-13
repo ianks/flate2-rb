@@ -5,19 +5,24 @@ require "securerandom"
 require "flate2"
 require "zlib"
 
-DATA = SecureRandom.random_bytes(1024 * 1024)
-COMPRESSED = Flate2.gzip(DATA)
+GEMSPEC = Gem::Specification.load("flate2.gemspec")
+FILES = GEMSPEC.files + Dir["lib/**/*.{bundle,so}"]
+DATASET = FILES.map { |file| Zlib.gzip(File.binread(file)) }
 
 Benchmark.ips do |x|
+  x.config(warmup: 0)
+
   x.report("Flate2.gunzip") do
-    Flate2.gunzip(COMPRESSED)
-  end
-
-  unless ENV["PROFILE_MODE"] == "1"
-    x.report("Zlib.gunzip") do
-      Zlib.gunzip(COMPRESSED)
+    DATASET.each do |data|
+      Flate2.gunzip(data)
     end
-
-    x.compare!
   end
+
+  x.report("Zlib.gunzip") do
+    DATASET.each do |data|
+      Zlib.gunzip(data)
+    end
+  end
+
+  x.compare!
 end

@@ -11,6 +11,8 @@ GEM
     json (2.7.1)
     language_server-protocol (3.17.0.3)
     minitest (5.20.0)
+    minitest-focus (1.4.0)
+      minitest (>= 4, < 6)
     parallel (1.24.0)
     parser (3.3.0.2)
       ast (~> 2.4.1)
@@ -47,6 +49,7 @@ DEPENDENCIES
   benchmark-ips
   flate2!
   minitest (~> 5.16)
+  minitest-focus (~> 1.4)
   rake (~> 13.0)
   rake-compiler
   rb_sys (~> 0.9.63)

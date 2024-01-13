@@ -14,3 +14,5 @@ gem "rubocop", "~> 1.21"
 group :bench do
   gem "benchmark-ips"
 end
+
+gem "minitest-focus", "~> 1.4"

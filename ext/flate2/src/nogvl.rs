@@ -1,6 +1,6 @@
 use std::{ffi::c_void, mem::MaybeUninit, ptr::null_mut};
 
-use rb_sys::rb_thread_call_without_gvl;
+use rb_sys::{rb_thread_call_with_gvl, rb_thread_call_without_gvl};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InterruptableError {
@@ -8,6 +8,8 @@ pub enum InterruptableError {
     Interrupt,
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("internal error: {0}")]
+    Internal(&'static str),
 }
 
 pub fn nogvl_with_interrupt_callback<F, R, I>(mut func: F, mut interrupt: I) -> R
@@ -22,16 +24,30 @@ where
 
     unsafe {
         rb_thread_call_without_gvl(
-            Some(call_without_gvl::<F, R>),
+            Some(ffi_wrap::<F, R>),
             arg_ptr,
-            Some(call_without_gvl_interrupt_callback::<I>),
+            Some(ffi_wrap_interrupt::<I>),
             interrupt_ptr,
         );
         result.assume_init()
     }
 }
 
-unsafe extern "C" fn call_without_gvl<F, R>(arg: *mut c_void) -> *mut c_void
+pub fn with_gvl<F, R>(mut func: F) -> R
+where
+    F: FnMut() -> R,
+    R: Sized,
+{
+    let result = MaybeUninit::uninit();
+    let arg_ptr = &(&mut func, &result) as *const _ as *mut c_void;
+
+    unsafe {
+        rb_thread_call_with_gvl(Some(ffi_wrap::<F, R>), arg_ptr);
+        result.assume_init()
+    }
+}
+
+unsafe extern "C" fn ffi_wrap<F, R>(arg: *mut c_void) -> *mut c_void
 where
     F: FnMut() -> R,
     R: Sized,
@@ -43,7 +59,7 @@ where
     null_mut()
 }
 
-unsafe extern "C" fn call_without_gvl_interrupt_callback<F>(arg: *mut c_void)
+unsafe extern "C" fn ffi_wrap_interrupt<F>(arg: *mut c_void)
 where
     F: FnMut(),
 {
